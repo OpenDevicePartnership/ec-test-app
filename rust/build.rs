@@ -3,6 +3,12 @@ use std::env;
 use std::fs;
 
 fn main() {
+    // Don't do a fancy build if we're just testing our TUI
+    if env::var("CARGO_FEATURE_MOCK").is_ok() {
+        println!("cargo:warning=Skipping build.rs logic because 'mock' feature is enabled.");
+        return;
+    }
+
     // Make sure all the EWDK environment variables are set
     let sdk_root = env::var("WindowsSdkDir").unwrap_or_else(|_| panic!("Please run SetupBuildEnv.cmd from EWDK"));
     let version = env::var("Version_Number").unwrap_or_else(|_| panic!("Please run SetupBuildEnv.cmd from EWDK"));

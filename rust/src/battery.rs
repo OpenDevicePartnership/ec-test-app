@@ -1,3 +1,4 @@
+#[cfg(not(feature = "mock"))]
 use crate::acpi::{Acpi, AcpiEvalOutputBufferV1};
 
 use ratatui::{
@@ -52,6 +53,7 @@ pub struct BixData {
 pub struct Battery {}
 
 // Convert ACPI result to BstData
+#[cfg(not(feature = "mock"))]
 impl From<AcpiEvalOutputBufferV1> for BstData {
     fn from(data: AcpiEvalOutputBufferV1) -> Self {
         // We are expecting 4 32-bit values
@@ -131,11 +133,22 @@ impl Battery {
             .render(gauge_area, buf);
     }
 
+    #[cfg(not(feature = "mock"))]
     fn get_bst() -> BstData {
         let result = Acpi::evaluate("\\_SB.ECT0.TBST");
         match result {
             Ok(value) => value.into(),
             Err(e) => panic!("Failed {}", e),
+        }
+    }
+
+    #[cfg(feature = "mock")]
+    fn get_bst() -> BstData {
+        BstData {
+            state: 2,
+            rate: 3839,
+            capacity: 5574,
+            voltage: 12569,
         }
     }
 
