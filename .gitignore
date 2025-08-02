@@ -4,7 +4,9 @@
 
 /.vs
 /exe/.vs/ectest_app
-/exe/ARM64/Debug
 /kmdf/.vs/ectest_kmdf
-/kmdf/ARM64/Debug
-/kmdf/ARM64/Release
+/exe/ARM64
+/lib/ARM64
+/lib/eclib/ARM64
+/kmdf/ARM64
+/rust/target

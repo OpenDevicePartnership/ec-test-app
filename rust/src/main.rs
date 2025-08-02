@@ -1,3 +1,4 @@
+#[cfg(not(feature = "mock"))]
 mod acpi;
 mod battery;
 mod rtc;
@@ -24,6 +25,8 @@ use ratatui::{
 
 use strum::{Display, EnumIter, FromRepr, IntoEnumIterator};
 
+use std::time::{Duration, Instant};
+
 fn main() -> Result<()> {
     color_eyre::install()?;
     let terminal = ratatui::init();
@@ -35,6 +38,8 @@ fn main() -> Result<()> {
 pub struct App {
     state: AppState,
     selected_tab: SelectedTab,
+    thermal: Thermal,
+    // TODO: Add fields for other services as they are implemented
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
@@ -46,9 +51,9 @@ enum AppState {
 
 #[derive(Default, Clone, Copy, Display, FromRepr, EnumIter)]
 enum SelectedTab {
-    #[default]
     #[strum(to_string = "Battery")]
     TabBattery,
+    #[default]
     #[strum(to_string = "Thermal")]
     TabThermal,
     #[strum(to_string = "RTC")]
@@ -65,21 +70,46 @@ impl App {
 
     /// Run the application's main loop.
     fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
+        let tick_rate = Duration::from_millis(1000);
+        let mut last_tick = Instant::now();
+
+        self.update();
         while self.state == AppState::Running {
             terminal.draw(|frame| frame.render_widget(&self, frame.area()))?;
-            self.handle_events()?;
+
+            // Adjust timeout to account for delay from handling input
+            let timeout = tick_rate.saturating_sub(last_tick.elapsed());
+
+            match event::poll(timeout) {
+                // Handle input if we got it
+                Ok(true) => {
+                    self.handle_events()?;
+                }
+                // But only update state if we actually timed out
+                Ok(false) => {
+                    self.update();
+                }
+                Err(_e) => todo!(),
+            }
+
+            if last_tick.elapsed() >= tick_rate {
+                last_tick = Instant::now();
+            }
         }
+
         Ok(())
     }
 
     fn handle_events(&mut self) -> std::io::Result<()> {
-        if let Event::Key(key) = event::read()? {
+        let evt = event::read()?;
+        if let Event::Key(key) = evt {
             if key.kind == KeyEventKind::Press {
                 match key.code {
                     KeyCode::Char('l') | KeyCode::Right => self.next_tab(),
                     KeyCode::Char('h') | KeyCode::Left => self.previous_tab(),
                     KeyCode::Char('q') | KeyCode::Esc => self.quit(),
-                    _ => {}
+                    // Let the current tab handle input in this case
+                    _ => self.handle_input(&evt),
                 }
             }
         }
@@ -132,7 +162,7 @@ impl Widget for &App {
 
         render_title(title_area, buf);
         self.render_tabs(tabs_area, buf);
-        self.selected_tab.render(inner_area, buf);
+        self.render_tab(inner_area, buf);
         render_footer(footer_area, buf);
     }
 }
@@ -149,6 +179,62 @@ impl App {
             .divider(" ")
             .render(area, buf);
     }
+
+    fn render_tab(&self, area: Rect, buf: &mut Buffer) {
+        match self.selected_tab {
+            SelectedTab::TabBattery => self.render_battery(area, buf),
+            SelectedTab::TabThermal => self.render_thermal(area, buf),
+            SelectedTab::TabRTC => self.render_rtc(area, buf),
+            SelectedTab::TabUCSI => self.render_ucsi(area, buf),
+        }
+    }
+
+    fn render_battery(&self, area: Rect, buf: &mut Buffer) {
+        let block = self.selected_tab.block().title("Battery Information");
+        let inner = block.inner(area);
+
+        block.render(area, buf);
+        Battery::render(inner, buf);
+    }
+
+    fn render_thermal(&self, area: Rect, buf: &mut Buffer) {
+        let block = self.selected_tab.block().title("Thermal Information");
+        let inner = block.inner(area);
+
+        block.render(area, buf);
+        self.thermal.render(inner, buf);
+    }
+
+    fn render_rtc(&self, area: Rect, buf: &mut Buffer) {
+        let block = self.selected_tab.block().title("RTC Information");
+        let inner = block.inner(area);
+
+        block.render(area, buf);
+        Rtc::render(inner, buf);
+    }
+
+    fn render_ucsi(&self, area: Rect, buf: &mut Buffer) {
+        let block = self.selected_tab.block().title("UCSI Information");
+        let inner = block.inner(area);
+
+        block.render(area, buf);
+        Ucsi::render(inner, buf);
+    }
+
+    fn handle_input(&mut self, evt: &Event) {
+        match self.selected_tab {
+            SelectedTab::TabThermal => self.thermal.handle_input(evt),
+            // TODO: Handle input for other tabs as they are implemented
+            SelectedTab::TabBattery => {}
+            SelectedTab::TabRTC => {}
+            SelectedTab::TabUCSI => {}
+        }
+    }
+
+    fn update(&mut self) {
+        self.thermal.update();
+        // TODO: Update other tabs as they are implemented
+    }
 }
 
 fn render_title(area: Rect, buf: &mut Buffer) {
@@ -161,18 +247,6 @@ fn render_footer(area: Rect, buf: &mut Buffer) {
         .render(area, buf);
 }
 
-impl Widget for SelectedTab {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        // in a real app these might be separate widgets
-        match self {
-            Self::TabBattery => self.render_battery(area, buf),
-            Self::TabThermal => self.render_thermal(area, buf),
-            Self::TabRTC => self.render_rtc(area, buf),
-            Self::TabUCSI => self.render_ucsi(area, buf),
-        }
-    }
-}
-
 impl SelectedTab {
     /// Return tab's name as a styled `Line`
     fn title(self) -> Line<'static> {
@@ -180,38 +254,6 @@ impl SelectedTab {
             .fg(tailwind::SLATE.c200)
             .bg(self.palette().c900)
             .into()
-    }
-
-    fn render_battery(self, area: Rect, buf: &mut Buffer) {
-        let block = self.block().title("Battery Information");
-        let inner = block.inner(area);
-
-        block.render(area, buf);
-        Battery::render(inner, buf);
-    }
-
-    fn render_thermal(self, area: Rect, buf: &mut Buffer) {
-        let block = self.block().title("Thermal Information");
-        let inner = block.inner(area);
-
-        block.render(area, buf);
-        Thermal::render(inner, buf);
-    }
-
-    fn render_rtc(self, area: Rect, buf: &mut Buffer) {
-        let block = self.block().title("RTC Information");
-        let inner = block.inner(area);
-
-        block.render(area, buf);
-        Rtc::render(inner, buf);
-    }
-
-    fn render_ucsi(self, area: Rect, buf: &mut Buffer) {
-        let block = self.block().title("UCSI Information");
-        let inner = block.inner(area);
-
-        block.render(area, buf);
-        Ucsi::render(inner, buf);
     }
 
     /// A block surrounding the tab's content
