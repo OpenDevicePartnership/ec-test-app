@@ -2,12 +2,27 @@ use crate::{Source, Threshold, common};
 use color_eyre::Result;
 use std::sync::{
     Mutex, OnceLock,
-    atomic::Ordering,
-    atomic::{AtomicI64, AtomicU32},
+    atomic::{AtomicI64, AtomicU32, AtomicU64, AtomicUsize, Ordering},
 };
 
 static SET_RPM: AtomicI64 = AtomicI64::new(-1);
 static SAMPLE: OnceLock<Mutex<(i64, i64)>> = OnceLock::new();
+
+// Produces a fake "on-the-wire" byte representation of a defmt call that matches format expected by mock-bin
+// Index is equal to the address of the log string in the `.defmt` section of mock-bin ELF
+// Mainly used for testing defmt decoding
+// `args` should be in LE format matching the arguments expected by corresponding log
+fn mock_defmt_wire(index: usize, timestamp: u64, args: &[u8]) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.extend(index.to_le_bytes());
+    buf.extend(timestamp.to_be_bytes()); // TODO: I don't seem to understand the proper timestamp format
+    buf.extend(args);
+    let mut buf = rzcobs::encode(&buf);
+
+    // End frame delimeter
+    buf.push(0x00);
+    buf
+}
 
 #[derive(Default, Copy, Clone)]
 pub struct Mock {}
@@ -138,6 +153,29 @@ impl Source for Mock {
     }
 
     fn set_btp(&self, _trippoint: u32) -> Result<()> {
+        // Do nothing for mock
+        Ok(())
+    }
+
+    fn get_dbg_data(&self) -> Result<Vec<u8>> {
+        const DEFMT_START: usize = 3;
+        const DEFMT_END: usize = 8;
+        static DEFMT_IDX: AtomicUsize = AtomicUsize::new(DEFMT_START);
+        static TIMESTAMP: AtomicU64 = AtomicU64::new(0);
+
+        let frame_idx = DEFMT_IDX.fetch_add(1, Ordering::Relaxed);
+        let timestamp = TIMESTAMP.fetch_add(100000, Ordering::Relaxed);
+        let frame = mock_defmt_wire(frame_idx, timestamp, &[]);
+
+        // Only using atomics to satisfy the borrow-checker, so do this for simplicity
+        if DEFMT_IDX.load(Ordering::Relaxed) > DEFMT_END {
+            DEFMT_IDX.store(DEFMT_START, Ordering::Relaxed);
+        }
+
+        Ok(frame)
+    }
+
+    fn send_dbg_cmd(&self, _cmd: String) -> Result<()> {
         // Do nothing for mock
         Ok(())
     }

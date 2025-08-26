@@ -15,15 +15,15 @@ const LABEL_COLOR: Color = tailwind::SLATE.c200;
 pub struct Ucsi {}
 
 impl Module for Ucsi {
-    fn title(&self) -> &'static str {
-        "UCSI Information"
+    fn title(&self) -> String {
+        "UCSI Information".into()
     }
 
     fn update(&mut self) {}
 
     fn handle_event(&mut self, _evt: &Event) {}
 
-    fn render(&self, area: Rect, buf: &mut Buffer) {
+    fn render(&mut self, area: Rect, buf: &mut Buffer) {
         let status_title = title_block("UCSI State");
         Paragraph::default().block(status_title).render(area, buf);
     }

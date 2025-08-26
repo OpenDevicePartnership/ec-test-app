@@ -9,6 +9,7 @@ pub mod mock;
 pub mod app;
 pub mod battery;
 pub mod common;
+pub mod debug;
 pub mod rtc;
 pub mod thermal;
 pub mod ucsi;
@@ -41,6 +42,12 @@ pub trait Source: Clone {
 
     /// Set battery trippoint
     fn set_btp(&self, trippoint: u32) -> Result<()>;
+
+    /// Get raw debug data for further processing
+    fn get_dbg_data(&self) -> Result<Vec<u8>>;
+
+    /// Send a debug command
+    fn send_dbg_cmd(&self, cmd: String) -> Result<()>;
 }
 
 pub enum Threshold {

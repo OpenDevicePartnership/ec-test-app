@@ -372,4 +372,12 @@ impl Source for Acpi {
         let _ = Acpi::evaluate("\\_SB.ECT0.TBTP", Some(&[AcpiMethodArgument::Int(trippoint)]))?;
         Ok(())
     }
+
+    fn get_dbg_data(&self) -> Result<Vec<u8>> {
+        todo!()
+    }
+
+    fn send_dbg_cmd(&self, _cmd: String) -> Result<()> {
+        todo!()
+    }
 }

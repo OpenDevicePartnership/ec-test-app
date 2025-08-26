@@ -11,5 +11,9 @@ fn main() -> Result<()> {
     #[cfg(feature = "mock")]
     let source = ec_demo::mock::Mock::default();
 
-    App::new(source).run(terminal)
+    // TODO: Use clap in the future if more args are expected
+    // This just uses the first arg as the elf path
+    let elf_path = std::env::args().nth(1).map(std::path::PathBuf::from);
+
+    App::new(source, elf_path)?.run(terminal)
 }

@@ -205,8 +205,8 @@ pub struct Battery<S: Source> {
 }
 
 impl<S: Source> Module for Battery<S> {
-    fn title(&self) -> &'static str {
-        "Battery Information"
+    fn title(&self) -> String {
+        "Battery Information".into()
     }
 
     fn update(&mut self) {
@@ -230,7 +230,7 @@ impl<S: Source> Module for Battery<S> {
         }
     }
 
-    fn render(&self, area: Rect, buf: &mut Buffer) {
+    fn render(&mut self, area: Rect, buf: &mut Buffer) {
         let [info_area, charge_area] = common::area_split(area, Direction::Horizontal, 80, 20);
         self.render_info(info_area, buf);
         self.render_battery(charge_area, buf);
