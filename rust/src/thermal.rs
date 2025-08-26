@@ -147,8 +147,8 @@ pub struct Thermal<S: Source> {
 }
 
 impl<S: Source> Module for Thermal<S> {
-    fn title(&self) -> &'static str {
-        "Thermal Information"
+    fn title(&self) -> String {
+        "Thermal Information".into()
     }
 
     fn update(&mut self) {
@@ -157,7 +157,7 @@ impl<S: Source> Module for Thermal<S> {
         self.t += 1;
     }
 
-    fn render(&self, area: Rect, buf: &mut Buffer) {
+    fn render(&mut self, area: Rect, buf: &mut Buffer) {
         let [sensor_area, fan_area] = common::area_split(area, Direction::Horizontal, 50, 50);
         self.render_sensor(sensor_area, buf);
         self.render_fan(fan_area, buf);
