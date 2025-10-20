@@ -1,7 +1,10 @@
+use std::borrow::Cow;
+
 use crate::app::Module;
 use crate::common;
 use crate::{Source, Threshold};
 use color_eyre::Result;
+use ratatui::layout::Constraint;
 use ratatui::{
     buffer::Buffer,
     crossterm::event::{Event, KeyCode, KeyEventKind},
@@ -147,8 +150,8 @@ pub struct Thermal<S: Source> {
 }
 
 impl<S: Source> Module for Thermal<S> {
-    fn title(&self) -> &'static str {
-        "Thermal Information"
+    fn title(&self) -> Cow<'static, str> {
+        "Thermal Information".into()
     }
 
     fn update(&mut self) {
@@ -157,7 +160,7 @@ impl<S: Source> Module for Thermal<S> {
         self.t += 1;
     }
 
-    fn render(&self, area: Rect, buf: &mut Buffer) {
+    fn render(&mut self, area: Rect, buf: &mut Buffer) {
         let [sensor_area, fan_area] = common::area_split(area, Direction::Horizontal, 50, 50);
         self.render_sensor(sensor_area, buf);
         self.render_fan(fan_area, buf);
@@ -312,7 +315,8 @@ impl<S: Source> Thermal<S> {
         let inner = title.inner(area);
         title.render(area, buf);
 
-        let [rpm_area, input_area] = common::area_split(inner, Direction::Vertical, 30, 70);
+        let [rpm_area, input_area] =
+            common::area_split_constrained(inner, Direction::Vertical, Constraint::Min(0), Constraint::Max(3));
 
         Paragraph::new(self.create_fan_stats()).render(rpm_area, buf);
         self.render_fan_rpm_input(input_area, buf);

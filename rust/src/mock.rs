@@ -2,12 +2,25 @@ use crate::{Source, Threshold, common};
 use color_eyre::Result;
 use std::sync::{
     Mutex, OnceLock,
-    atomic::Ordering,
-    atomic::{AtomicI64, AtomicU32},
+    atomic::{AtomicI64, AtomicU16, AtomicU32, AtomicU64, Ordering},
 };
 
 static SET_RPM: AtomicI64 = AtomicI64::new(-1);
 static SAMPLE: OnceLock<Mutex<(i64, i64)>> = OnceLock::new();
+
+// Produces a fake "on-the-wire" byte representation of a defmt call that matches format expected by mock-bin
+// Index is equal to the address of the log string in the `.defmt` section of mock-bin ELF
+// Mainly used for testing defmt decoding
+fn mock_defmt_wire(index: u16, timestamp: u64) -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.extend(index.to_le_bytes());
+    buf.extend(timestamp.to_le_bytes());
+    let mut buf = rzcobs::encode(&buf);
+
+    // End frame delimeter
+    buf.push(0x00);
+    buf
+}
 
 #[derive(Default, Copy, Clone)]
 pub struct Mock {}
@@ -140,5 +153,22 @@ impl Source for Mock {
     fn set_btp(&self, _trippoint: u32) -> Result<()> {
         // Do nothing for mock
         Ok(())
+    }
+
+    fn get_dbg(&self) -> Result<Vec<u8>> {
+        const DEFMT_START: u16 = 1;
+        const DEFMT_END: u16 = 6;
+        static DEFMT_IDX: AtomicU16 = AtomicU16::new(DEFMT_START);
+        static TIMESTAMP: AtomicU64 = AtomicU64::new(0);
+
+        let frame_idx = DEFMT_IDX.fetch_add(1, Ordering::Relaxed);
+        let timestamp = TIMESTAMP.fetch_add(100000, Ordering::Relaxed);
+        let frame = mock_defmt_wire(frame_idx, timestamp);
+
+        let _ = DEFMT_IDX.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |idx| {
+            (idx > DEFMT_END).then_some(DEFMT_START)
+        });
+
+        Ok(frame)
     }
 }

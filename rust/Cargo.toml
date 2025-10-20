@@ -18,12 +18,16 @@ log = "0.4"
 env_logger = "0.10"
 tui-input = "0.14.0"
 uuid = { version = "1.17.0", default-features = false }
+defmt-decoder = "1.0.0"
+rzcobs = { version = "0.1.2", optional = true }
+clap = { version = "4.5.46", features = ["derive"] }
+self_cell = "1.2.0"
 
 [features]
-mock = []
+mock = ["dep:rzcobs"]
 
 [lints.clippy]
-suspicious = "forbid"
-correctness = "forbid"
-perf = "forbid"
-style = "forbid"
+suspicious = "deny"
+correctness = "deny"
+perf = "deny"
+style = "deny"

@@ -13,7 +13,7 @@ pub struct SampleBuf<T, const N: usize> {
     samples: VecDeque<T>,
 }
 
-impl<T: Into<f64> + Copy, const N: usize> SampleBuf<T, N> {
+impl<T, const N: usize> SampleBuf<T, N> {
     // Insert a sample into the buffer and evict the oldest if full
     pub fn insert(&mut self, sample: T) {
         self.samples.push_back(sample);
@@ -22,7 +22,17 @@ impl<T: Into<f64> + Copy, const N: usize> SampleBuf<T, N> {
         }
     }
 
-    // Converts the buffer into a format that ratatui can use
+    pub fn len(&self) -> usize {
+        self.samples.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.samples.is_empty()
+    }
+}
+
+impl<T: Into<f64> + Copy, const N: usize> SampleBuf<T, N> {
+    // Converts the buffer into a format that ratatui can use for charts
     // Probably more efficent way than copying but buffer is small and only called once a second
     pub fn get(&self) -> Vec<(f64, f64)> {
         self.samples
@@ -30,6 +40,13 @@ impl<T: Into<f64> + Copy, const N: usize> SampleBuf<T, N> {
             .enumerate()
             .map(|(i, &val)| (i as f64, val.into()))
             .collect()
+    }
+}
+
+impl<T: Clone, const N: usize> SampleBuf<T, N> {
+    // Some ratatui methods need a owned vec of data and unfortunately don't accept a ref
+    pub fn as_vec(&self) -> Vec<T> {
+        self.samples.clone().into()
     }
 }
 
@@ -58,10 +75,15 @@ pub fn area_split(area: Rect, direction: Direction, first: u16, second: u16) -> 
     Layout::default()
         .direction(direction)
         .constraints([Constraint::Percentage(first), Constraint::Percentage(second)])
-        .split(area)
-        .as_ref()
-        .try_into()
-        .unwrap()
+        .areas(area)
+}
+
+// Splits an area in a direction with given constraints
+pub fn area_split_constrained(area: Rect, direction: Direction, first: Constraint, second: Constraint) -> [Rect; 2] {
+    Layout::default()
+        .direction(direction)
+        .constraints([first, second])
+        .areas(area)
 }
 
 // Create a wrapping title block

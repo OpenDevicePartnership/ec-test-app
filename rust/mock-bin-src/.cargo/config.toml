@@ -1,0 +1,10 @@
+[build]
+target = "thumbv8m.main-none-eabihf"
+rustflags = [
+  "-C", "link-arg=-Tlink.x",
+  "-C", "link-arg=-Tdefmt.x",
+  "-C", "link-arg=--nmagic",
+]
+
+[env]
+DEFMT_LOG = "trace"

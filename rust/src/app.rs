@@ -1,3 +1,5 @@
+use crate::debug::Debug;
+use crate::notifications::Notifications;
 use crate::rtc::Rtc;
 use crate::thermal::Thermal;
 use crate::ucsi::Ucsi;
@@ -5,10 +7,11 @@ use crate::{Source, battery::Battery};
 
 use color_eyre::Result;
 
+use clap::Parser;
 use ratatui::{
     DefaultTerminal,
     buffer::Buffer,
-    crossterm::event::{self, Event, KeyCode, KeyEventKind},
+    crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     layout::{Constraint, Layout, Rect},
     style::{Color, Stylize, palette::tailwind},
     symbols,
@@ -16,6 +19,7 @@ use ratatui::{
     widgets::{Block, Padding, Tabs, Widget},
 };
 
+use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::{
     cell::RefCell,
@@ -29,7 +33,7 @@ use strum::{Display, EnumIter, FromRepr, IntoEnumIterator};
 /// Internal trait to be implemented by modules (or Tabs).
 pub(crate) trait Module {
     /// The module's title.
-    fn title(&self) -> &'static str;
+    fn title(&self) -> Cow<'static, str>;
 
     /// Update the module.
     fn update(&mut self);
@@ -38,7 +42,7 @@ pub(crate) trait Module {
     fn handle_event(&mut self, evt: &Event);
 
     /// Render the module.
-    fn render(&self, area: Rect, buf: &mut Buffer);
+    fn render(&mut self, area: Rect, buf: &mut Buffer);
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
@@ -51,6 +55,8 @@ enum AppState {
 #[derive(Default, Clone, Copy, Display, FromRepr, EnumIter, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum SelectedTab {
     #[default]
+    #[strum(to_string = "Debug")]
+    TabDebug,
     #[strum(to_string = "Battery")]
     TabBattery,
     #[strum(to_string = "Thermal")]
@@ -59,6 +65,20 @@ enum SelectedTab {
     TabRTC,
     #[strum(to_string = "UCSI")]
     TabUCSI,
+}
+
+#[derive(Parser)]
+#[command(
+    name = "ODP End-to-End Demo",
+    version,
+    about = "TUI application demonstrating Host-to-EC communication using Rust-based ODP components"
+)]
+pub struct AppArgs {
+    #[arg(
+        long,
+        help = "Path to ELF file containing debug symbols and defmt strings currently running on EC"
+    )]
+    bin: Option<String>,
 }
 
 /// The main application which holds the state and logic of the application.
@@ -71,12 +91,13 @@ pub struct App<S: Source> {
 
 impl<S: Source + Clone + 'static> App<S> {
     /// Construct a new instance of [`App`].
-    pub fn new(source: S) -> Self {
+    pub fn new(source: S, args: AppArgs, notifications: &Notifications) -> Self {
         let mut modules: BTreeMap<SelectedTab, Box<dyn Module>> = BTreeMap::new();
         let source = Rc::new(RefCell::new(source));
 
         let thermal_source = Rc::clone(&source);
         let battery_source = Rc::clone(&source);
+        let debug_source = Rc::clone(&source);
 
         modules.insert(
             SelectedTab::TabThermal,
@@ -87,6 +108,14 @@ impl<S: Source + Clone + 'static> App<S> {
         modules.insert(
             SelectedTab::TabBattery,
             Box::new(Battery::new(battery_source.borrow().clone())),
+        );
+        modules.insert(
+            SelectedTab::TabDebug,
+            Box::new(Debug::new(
+                debug_source.borrow().clone(),
+                args.bin.as_ref().map(std::path::PathBuf::from),
+                notifications,
+            )),
         );
 
         Self {
@@ -103,7 +132,9 @@ impl<S: Source + Clone + 'static> App<S> {
         let mut last_tick = Instant::now();
 
         while self.state == AppState::Running {
-            terminal.draw(|frame| frame.render_widget(&self, frame.area()))?;
+            terminal.draw(|frame| {
+                frame.render_widget(&mut self, frame.area());
+            })?;
 
             // Adjust timeout to account for delay from handling input
             let timeout = tick_rate.saturating_sub(last_tick.elapsed());
@@ -127,9 +158,10 @@ impl<S: Source + Clone + 'static> App<S> {
         if let Event::Key(key) = evt {
             if key.kind == KeyEventKind::Press {
                 match key.code {
-                    KeyCode::Char('l') | KeyCode::Right => self.next_tab(),
-                    KeyCode::Char('h') | KeyCode::Left => self.previous_tab(),
-                    KeyCode::Char('q') | KeyCode::Esc => self.quit(),
+                    // Check for shift modifier so tabs can still make use of Shift+Arrow Key
+                    KeyCode::Right if !key.modifiers.contains(KeyModifiers::SHIFT) => self.next_tab(),
+                    KeyCode::Left if !key.modifiers.contains(KeyModifiers::SHIFT) => self.previous_tab(),
+                    KeyCode::Esc => self.quit(),
 
                     // Let the current tab handle event in this case
                     _ => self.handle_tab_event(&evt),
@@ -176,8 +208,8 @@ impl<S: Source + Clone + 'static> App<S> {
             .render(area, buf);
     }
 
-    fn render_selected_tab(&self, area: Rect, buf: &mut Buffer) {
-        let module = self.modules.get(&self.selected_tab).expect("Tab must exist");
+    fn render_selected_tab(&mut self, area: Rect, buf: &mut Buffer) {
+        let module = self.modules.get_mut(&self.selected_tab).expect("Tab must exist");
         let block = self.selected_tab.block().title(module.title());
         let inner = block.inner(area);
 
@@ -186,7 +218,7 @@ impl<S: Source + Clone + 'static> App<S> {
     }
 }
 
-impl<S: Source + 'static> Widget for &App<S> {
+impl<S: Source + 'static> Widget for &mut App<S> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         use Constraint::{Length, Min};
         let vertical = Layout::vertical([Length(1), Min(0), Length(1)]);
@@ -229,7 +261,7 @@ fn render_title(area: Rect, buf: &mut Buffer) {
 }
 
 fn render_footer(area: Rect, buf: &mut Buffer) {
-    Line::raw("◄ ► to change tab | Press q to quit")
+    Line::raw("◄ ► to change tab | Press ESC to quit")
         .centered()
         .render(area, buf);
 }
@@ -253,6 +285,7 @@ impl SelectedTab {
 
     const fn palette(self) -> tailwind::Palette {
         match self {
+            Self::TabDebug => tailwind::GRAY,
             Self::TabBattery => tailwind::BLUE,
             Self::TabThermal => tailwind::EMERALD,
             Self::TabRTC => tailwind::INDIGO,
