@@ -279,7 +279,7 @@ VOID CleanupNotification()
     // Cancel any pending IO
     if(g_notify.handle) {
         while(g_notify.in_progress) {
-            CancelIo(g_notify.handle);
+            CancelIoEx(g_notify.handle, NULL);
             SleepConditionVariableCS(&g_notify.cv, &g_notify.lock, INFINITE);
         }
         CloseHandle(g_notify.handle);
@@ -301,7 +301,10 @@ VOID CleanupNotification()
  *   UINT32 event - The event code to wait for (0 for any event).
  *
  * Returns:
- *   UINT32 - The event code received, or 0 if none.
+ *   UINT32 - The event code received, or 0 if none (or error).
+ * 
+ * Errors:
+ *   ERROR_INVALID_HANDLE - Notifications are not initialized thus the handle is invalid.
  */
 ECLIB_API
 UINT32 WaitForNotification(UINT32 event)
@@ -310,14 +313,18 @@ UINT32 WaitForNotification(UINT32 event)
     UINT32 ievent = 0;
     NotificationRsp_t notify_response = {0};
     NotificationReq_t notify_request = {0};
-
-    // Make sure Initialization has been done
-    if(g_notify.handle == INVALID_HANDLE_VALUE) {
-        return 0;
-    }   
+    BOOL aborted = FALSE;
 
     // Loop until we get event we are looking for
     for(;;) {
+        // Make sure Initialization has been done
+        // This is checked every iteration because CleanupNotification may have been called which
+        // destroys the critical section, and attempting to enter it below is undefined behavior
+        if(g_notify.handle == INVALID_HANDLE_VALUE) {
+            SetLastError(ERROR_INVALID_HANDLE);
+            return 0;
+        }  
+
         // There could be many calls into this function, only first call calls into KMDF driver
         // Subsequent calls just wait for the event to be set by the KMDF driver
         EnterCriticalSection(&g_notify.lock);
@@ -339,19 +346,33 @@ UINT32 WaitForNotification(UINT32 event)
                                 ) == TRUE )
             {
                 g_notify.event = notify_response.lastevent;               
+            // Tricky race condition where Cleanup cancels the IO call and we beat it back to the top
+            // where we set in_progress to true again, then Cleanup calls cancel again but we haven't
+            // entered IoControl call yet, but then we get there and Cleanup is sleeping but now we
+            // are stuck in IoControl and can't return to Wake it again resulting in deadlock.
+            // So we explicitly check if we returned due to being cancelled and bail out of the loop to prevent this.
+            } else if(GetLastError() == ERROR_OPERATION_ABORTED) {
+                aborted = TRUE;
             } else {
                 g_notify.event = 0;
             }
 
+            // Enter critical section here to ensure wake is caught by Cleanup
+            EnterCriticalSection(&g_notify.lock);
             g_notify.in_progress = FALSE;
             WakeAllConditionVariable(&g_notify.cv);
         } else {
             // Wait for notification to be set
-            LeaveCriticalSection(&g_notify.lock);
-            SleepConditionVariableCS(&g_notify.cv, &g_notify.lock, INFINITE);
+            // Loop for spurious wakeups
+            while(g_notify.in_progress) {
+                SleepConditionVariableCS(&g_notify.cv, &g_notify.lock, INFINITE);
+            }
         }
 
-        if(event == 0 || g_notify.event == event) {
+        // Regardless of branch we are always in a critical section at this point so leave it
+        LeaveCriticalSection(&g_notify.lock);
+
+        if(aborted || event == 0 || g_notify.event == event) {
             ievent = g_notify.event;
             break;
         }

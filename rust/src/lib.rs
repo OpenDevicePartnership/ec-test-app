@@ -9,13 +9,15 @@ pub mod mock;
 pub mod app;
 pub mod battery;
 pub mod common;
+pub mod debug;
+pub mod notifications;
 pub mod rtc;
 pub mod thermal;
 pub mod ucsi;
 pub mod widgets;
 
 /// Trait implemented by all data sources
-pub trait Source: Clone {
+pub trait Source: Clone + Send + 'static {
     /// Get current temperature
     fn get_temperature(&self) -> Result<f64>;
 
@@ -42,6 +44,9 @@ pub trait Source: Clone {
 
     /// Set battery trippoint
     fn set_btp(&self, trippoint: u32) -> Result<()>;
+
+    /// Get raw debug data for further processing
+    fn get_dbg(&self) -> Result<Vec<u8>>;
 }
 
 pub enum Threshold {

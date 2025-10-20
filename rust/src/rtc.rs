@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use crossterm::event::Event;
 use ratatui::{
     buffer::Buffer,
@@ -15,15 +17,15 @@ const LABEL_COLOR: Color = tailwind::SLATE.c200;
 pub struct Rtc {}
 
 impl Module for Rtc {
-    fn title(&self) -> &'static str {
-        "RTC Information"
+    fn title(&self) -> Cow<'static, str> {
+        "RTC Information".into()
     }
 
     fn update(&mut self) {}
 
     fn handle_event(&mut self, _evt: &Event) {}
 
-    fn render(&self, area: Rect, buf: &mut Buffer) {
+    fn render(&mut self, area: Rect, buf: &mut Buffer) {
         let status_title = title_block("RTC Properties");
         Paragraph::default().block(status_title).render(area, buf);
     }

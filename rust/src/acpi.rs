@@ -372,4 +372,15 @@ impl Source for Acpi {
         let _ = Acpi::evaluate("\\_SB.ECT0.TBTP", Some(&[AcpiMethodArgument::Int(trippoint)]))?;
         Ok(())
     }
+
+    fn get_dbg(&self) -> Result<Vec<u8>> {
+        let data = Acpi::evaluate("\\_SB.ECT0.DMSG", None)?;
+
+        // Should be expecting a single output argument: A complete defmt frame in raw bytes
+        if data.count != 1 {
+            Err(eyre!("DMSG unrecognized output"))
+        } else {
+            Ok(data.arguments[0].data.clone())
+        }
+    }
 }

@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use crate::Source;
 use crate::app::Module;
 use crate::common;
@@ -198,7 +200,6 @@ impl Default for BatteryState {
     }
 }
 
-#[derive(Default)]
 pub struct Battery<S: Source> {
     bst_data: BstData,
     bix_data: BixData,
@@ -209,8 +210,8 @@ pub struct Battery<S: Source> {
 }
 
 impl<S: Source> Module for Battery<S> {
-    fn title(&self) -> &'static str {
-        "Battery Information"
+    fn title(&self) -> Cow<'static, str> {
+        "Battery Information".into()
     }
 
     fn update(&mut self) {
@@ -234,7 +235,7 @@ impl<S: Source> Module for Battery<S> {
         }
     }
 
-    fn render(&self, area: Rect, buf: &mut Buffer) {
+    fn render(&mut self, area: Rect, buf: &mut Buffer) {
         let [info_area, charge_area] = common::area_split(area, Direction::Horizontal, 80, 20);
         self.render_info(info_area, buf);
         self.render_battery(charge_area, buf);
@@ -443,7 +444,7 @@ impl<S: Source> Battery<S> {
         vec![Line::raw(format!(
             "Current: {} {}",
             self.state.btp,
-            self.bix_data.power_unit.as_capacity_str()
+            self.bix_data.power_unit.as_capacity_str(),
         ))]
     }
 
