@@ -1,4 +1,7 @@
 use crate::{RtcSource, Source, Threshold, common};
+use battery_service_messages::{
+    BatteryState, BixFixedStrings, BstReturn, bat_swap_try_from_u32, bat_tech_try_from_u32, power_unit_try_from_u32,
+};
 use color_eyre::{Result, eyre::eyre};
 use std::ffi;
 use time_alarm_service_messages::{
@@ -338,73 +341,93 @@ impl Source for Acpi {
     }
 
     fn get_rpm(&self) -> Result<f64> {
-        acpi_get_var(guid::FAN_CURRENT_RPM)
+        acpi_get_var(common::guid::FAN_CURRENT_RPM)
     }
 
     fn get_min_rpm(&self) -> Result<f64> {
-        acpi_get_var(guid::FAN_MIN_RPM)
+        acpi_get_var(common::guid::FAN_MIN_RPM)
     }
 
     fn get_max_rpm(&self) -> Result<f64> {
-        acpi_get_var(guid::FAN_MAX_RPM)
+        acpi_get_var(common::guid::FAN_MAX_RPM)
     }
 
     fn get_threshold(&self, threshold: Threshold) -> Result<f64> {
         match threshold {
-            Threshold::On => Ok(common::dk_to_c(acpi_get_var(guid::FAN_ON_TEMP)? as u32)),
-            Threshold::Ramping => Ok(common::dk_to_c(acpi_get_var(guid::FAN_RAMP_TEMP)? as u32)),
-            Threshold::Max => Ok(common::dk_to_c(acpi_get_var(guid::FAN_MAX_TEMP)? as u32)),
+            Threshold::On => Ok(common::dk_to_c(acpi_get_var(common::guid::FAN_ON_TEMP)? as u32)),
+            Threshold::Ramping => Ok(common::dk_to_c(acpi_get_var(common::guid::FAN_RAMP_TEMP)? as u32)),
+            Threshold::Max => Ok(common::dk_to_c(acpi_get_var(common::guid::FAN_MAX_TEMP)? as u32)),
         }
     }
 
     fn set_rpm(&self, rpm: f64) -> Result<()> {
-        acpi_set_var(guid::FAN_CURRENT_RPM, rpm)
+        acpi_set_var(common::guid::FAN_CURRENT_RPM, rpm)
     }
 
-    fn get_bst(&self) -> Result<crate::battery::BstData> {
+    fn get_bst(&self) -> Result<BstReturn> {
         let data = Acpi::evaluate("\\_SB.ECT0.TBST", None)?;
 
         // We are expecting 4 32-bit values
         if data.count != 4 {
             Err(eyre!("GET_BST unrecognized output"))
         } else {
-            Ok(crate::battery::BstData {
-                state: crate::battery::ChargeState::try_from(data.arguments[0].data_32)?,
-                rate: data.arguments[1].data_32,
-                capacity: data.arguments[2].data_32,
-                voltage: data.arguments[3].data_32,
+            Ok(BstReturn {
+                battery_state: BatteryState::from_bits(data.arguments[0].data_32)
+                    .ok_or(eyre!("Invalid BatteryState"))?,
+                battery_present_rate: data.arguments[1].data_32,
+                battery_remaining_capacity: data.arguments[2].data_32,
+                battery_present_voltage: data.arguments[3].data_32,
             })
         }
     }
 
-    fn get_bix(&self) -> Result<crate::battery::BixData> {
+    fn get_bix(&self) -> Result<BixFixedStrings> {
         let data = Acpi::evaluate("\\_SB.ECT0.TBIX", None)?;
         // We are expecting 21 arguments
         if data.count != 21 {
             Err(eyre!("GET_BIX unrecognized output"))
         } else {
-            Ok(crate::battery::BixData {
+            Ok(BixFixedStrings {
                 revision: data.arguments[0].data_32,
-                power_unit: crate::battery::PowerUnit::try_from(data.arguments[1].data_32)?,
+                power_unit: power_unit_try_from_u32(data.arguments[1].data_32)
+                    .map_err(|_| eyre!("Invalid PowerUnit"))?,
                 design_capacity: data.arguments[2].data_32,
-                last_full_capacity: data.arguments[3].data_32,
-                battery_technology: crate::battery::BatteryTechnology::try_from(data.arguments[4].data_32)?,
+                last_full_charge_capacity: data.arguments[3].data_32,
+                battery_technology: bat_tech_try_from_u32(data.arguments[4].data_32)
+                    .map_err(|_| eyre!("Invalid BatteryTechnology"))?,
                 design_voltage: data.arguments[5].data_32,
-                warning_capacity: data.arguments[6].data_32,
-                low_capacity: data.arguments[7].data_32,
+                design_cap_of_warning: data.arguments[6].data_32,
+                design_cap_of_low: data.arguments[7].data_32,
                 cycle_count: data.arguments[8].data_32,
-                accuracy: data.arguments[9].data_32,
-                max_sample_time: data.arguments[10].data_32,
-                min_sample_time: data.arguments[11].data_32,
-                max_average_interval: data.arguments[12].data_32,
-                min_average_interval: data.arguments[13].data_32,
-                capacity_gran1: data.arguments[14].data_32,
-                capacity_gran2: data.arguments[15].data_32,
-                model_number: cstr_bytes_to_string(&data.arguments[16].data)?,
-                serial_number: cstr_bytes_to_string(&data.arguments[17].data)?,
-                battery_type: cstr_bytes_to_string(&data.arguments[18].data)?,
-                oem_info: cstr_bytes_to_string(&data.arguments[19].data)?,
-                swap_cap: crate::battery::SwapCap::try_from(data.arguments[20].data_32)?,
+                measurement_accuracy: data.arguments[9].data_32,
+                max_sampling_time: data.arguments[10].data_32,
+                min_sampling_time: data.arguments[11].data_32,
+                max_averaging_interval: data.arguments[12].data_32,
+                min_averaging_interval: data.arguments[13].data_32,
+                battery_capacity_granularity_1: data.arguments[14].data_32,
+                battery_capacity_granularity_2: data.arguments[15].data_32,
+                model_number: data.arguments[16]
+                    .data
+                    .clone()
+                    .try_into()
+                    .map_err(|_| eyre!("Invalid model number"))?,
+                serial_number: data.arguments[17]
+                    .data
+                    .clone()
+                    .try_into()
+                    .map_err(|_| eyre!("Invalid serial number"))?,
+                battery_type: data.arguments[18]
+                    .data
+                    .clone()
+                    .try_into()
+                    .map_err(|_| eyre!("Invalid battery type"))?,
+                oem_info: data.arguments[19]
+                    .data
+                    .clone()
+                    .try_into()
+                    .map_err(|_| eyre!("Invalid OEM info"))?,
+                battery_swapping_capability: bat_swap_try_from_u32(data.arguments[20].data_32)
+                    .map_err(|_| eyre!("Invalid BatterySwapCapability"))?,
             })
         }
     }

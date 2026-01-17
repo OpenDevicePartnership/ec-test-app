@@ -4,8 +4,8 @@ use std::fs;
 
 fn main() {
     // Don't do a fancy build if we're just testing our TUI
-    if env::var("CARGO_FEATURE_MOCK").is_ok() {
-        println!("cargo:warning=Skipping build.rs logic because 'mock' feature is enabled.");
+    if env::var("CARGO_FEATURE_ACPI").is_err() {
+        println!("cargo:warning=Skipping build.rs logic because 'acpi' feature is not enabled.");
         return;
     }
 

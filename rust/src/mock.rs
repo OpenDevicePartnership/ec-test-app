@@ -1,5 +1,8 @@
 use crate::{RtcSource, Source, Threshold, common};
-use color_eyre::Result;
+use battery_service_messages::{
+    BatteryState, BatterySwapCapability, BatteryTechnology, BixFixedStrings, BstReturn, PowerUnit,
+};
+use color_eyre::{Result, eyre::eyre};
 use embedded_mcu_hal::time::{Datetime, Month, UncheckedDatetime};
 use std::sync::{
     Mutex, OnceLock,
@@ -85,7 +88,7 @@ impl Source for Mock {
         Ok(())
     }
 
-    fn get_bst(&self) -> Result<crate::battery::BstData> {
+    fn get_bst(&self) -> Result<BstReturn> {
         static STATE: AtomicU32 = AtomicU32::new(2);
         const MAX_CAPACITY: u32 = 10000;
         static CAPACITY: AtomicU32 = AtomicU32::new(0);
@@ -110,37 +113,37 @@ impl Source for Mock {
         }
         CAPACITY.store(new_capacity.clamp(0, MAX_CAPACITY), Ordering::Relaxed);
 
-        Ok(crate::battery::BstData {
-            state: crate::battery::ChargeState::try_from(state)?,
-            rate: 3839,
-            capacity,
-            voltage: 12569,
+        Ok(BstReturn {
+            battery_state: BatteryState::from_bits(state).ok_or(eyre!("Invalid BatteryState"))?,
+            battery_present_rate: 3839,
+            battery_remaining_capacity: capacity,
+            battery_present_voltage: 12569,
         })
     }
 
-    fn get_bix(&self) -> Result<crate::battery::BixData> {
-        Ok(crate::battery::BixData {
+    fn get_bix(&self) -> Result<BixFixedStrings> {
+        Ok(BixFixedStrings {
             revision: 1,
-            power_unit: crate::battery::PowerUnit::Mw,
+            power_unit: PowerUnit::MilliWatts,
             design_capacity: 10000,
-            last_full_capacity: 9890,
-            battery_technology: crate::battery::BatteryTechnology::Primary,
+            last_full_charge_capacity: 9890,
+            battery_technology: BatteryTechnology::Primary,
             design_voltage: 13000,
-            warning_capacity: 5000,
-            low_capacity: 3000,
+            design_cap_of_warning: 5000,
+            design_cap_of_low: 3000,
             cycle_count: 1337,
-            accuracy: 80000,
-            max_sample_time: 42,
-            min_sample_time: 7,
-            max_average_interval: 5,
-            min_average_interval: 1,
-            capacity_gran1: 10,
-            capacity_gran2: 10,
-            model_number: "42.0".to_string(),
-            serial_number: "123-45-678".to_string(),
-            battery_type: "Li-ion".to_string(),
-            oem_info: "Battery Bros.".to_string(),
-            swap_cap: crate::battery::SwapCap::ColdSwappable,
+            measurement_accuracy: 80000,
+            max_sampling_time: 42,
+            min_sampling_time: 7,
+            max_averaging_interval: 5,
+            min_averaging_interval: 1,
+            battery_capacity_granularity_1: 10,
+            battery_capacity_granularity_2: 10,
+            model_number: [b'4', b'2', b'.', b'0', 0, 0, 0, 0],
+            serial_number: [b'1', b'2', b'3', b'-', b'4', b'5', 0, 0],
+            battery_type: [b'L', b'i', b'-', b'o', b'n', 0, 0, 0],
+            oem_info: [b'B', b'a', b't', b'B', b'r', b'o', b's', 0],
+            battery_swapping_capability: BatterySwapCapability::ColdSwappable,
         })
     }
 

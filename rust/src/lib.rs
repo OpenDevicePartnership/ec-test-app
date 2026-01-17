@@ -1,14 +1,25 @@
+const _: () = {
+    let count = cfg!(feature = "mock") as u8 + cfg!(feature = "acpi") as u8 + cfg!(feature = "serial") as u8;
+    assert!(
+        count == 1,
+        "Exactly one of the following features must be enabled: `mock`, `acpi`, or `serial`."
+    );
+};
+
 use color_eyre::Result;
 
 use time_alarm_service_messages::{
     AcpiTimerId, AcpiTimestamp, AlarmExpiredWakePolicy, AlarmTimerSeconds, TimeAlarmDeviceCapabilities, TimerStatus,
 };
 
-#[cfg(not(feature = "mock"))]
+#[cfg(feature = "acpi")]
 pub mod acpi;
 
 #[cfg(feature = "mock")]
 pub mod mock;
+
+#[cfg(feature = "serial")]
+pub mod serial;
 
 pub mod app;
 pub mod battery;
@@ -17,6 +28,8 @@ pub mod rtc;
 pub mod thermal;
 pub mod ucsi;
 pub mod widgets;
+
+use battery_service_messages::{BixFixedStrings, BstReturn};
 
 /// Trait implemented by all data sources
 pub trait Source: Clone + RtcSource {
@@ -39,10 +52,10 @@ pub trait Source: Clone + RtcSource {
     fn set_rpm(&self, rpm: f64) -> Result<()>;
 
     /// Get battery BST data
-    fn get_bst(&self) -> Result<battery::BstData>;
+    fn get_bst(&self) -> Result<BstReturn>;
 
     /// Get battery BIX data
-    fn get_bix(&self) -> Result<battery::BixData>;
+    fn get_bix(&self) -> Result<BixFixedStrings>;
 
     /// Set battery trippoint
     fn set_btp(&self, trippoint: u32) -> Result<()>;

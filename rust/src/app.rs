@@ -125,16 +125,16 @@ impl<S: Source + Clone + 'static> App<S> {
 
     fn handle_events(&mut self) -> std::io::Result<()> {
         let evt = event::read()?;
-        if let Event::Key(key) = evt {
-            if key.kind == KeyEventKind::Press {
-                match key.code {
-                    KeyCode::Char('l') | KeyCode::Right => self.next_tab(),
-                    KeyCode::Char('h') | KeyCode::Left => self.previous_tab(),
-                    KeyCode::Char('q') | KeyCode::Esc => self.quit(),
+        if let Event::Key(key) = evt
+            && key.kind == KeyEventKind::Press
+        {
+            match key.code {
+                KeyCode::Char('l') | KeyCode::Right => self.next_tab(),
+                KeyCode::Char('h') | KeyCode::Left => self.previous_tab(),
+                KeyCode::Char('q') | KeyCode::Esc => self.quit(),
 
-                    // Let the current tab handle event in this case
-                    _ => self.handle_tab_event(&evt),
-                }
+                // Let the current tab handle event in this case
+                _ => self.handle_tab_event(&evt),
             }
         }
         Ok(())

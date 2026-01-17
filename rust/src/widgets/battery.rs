@@ -151,7 +151,7 @@ impl StatefulWidget for Battery {
             .render(tip_area, buf);
 
         if state.is_charging {
-            Bolt::default().render(battery_area, buf)
+            Bolt.render(battery_area, buf)
         }
     }
 }
