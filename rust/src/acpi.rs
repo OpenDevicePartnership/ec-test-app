@@ -1,11 +1,27 @@
-use crate::{Source, Threshold, common};
+use crate::{RtcSource, Source, Threshold, common};
 use color_eyre::{Result, eyre::eyre};
 use std::ffi;
+use time_alarm_service_messages::{
+    AcpiTimerId, AcpiTimestamp, AlarmExpiredWakePolicy, AlarmTimerSeconds, TimeAlarmDeviceCapabilities, TimerStatus,
+};
 
 // This module maps the data returned from call into the C-Library to RUST structures
 unsafe extern "C" {
     fn EvaluateAcpi(input: *const i8, input_len: usize, buffer: *mut u8, buf_len: &mut usize) -> i32;
 }
+
+#[derive(num_enum::IntoPrimitive, num_enum::TryFromPrimitive, Debug, Copy, Clone)]
+#[repr(u16)]
+/// ACPI argument types - these correspond to the ACPI_METHOD_ARGUMENT_* defines in apiioct.h from the Windows SDK
+enum AcpiArgumentType {
+    Integer = 0x0,
+    String = 0x1,
+    Buffer = 0x2,
+    Package = 0x3,
+    PackageEx = 0x4,
+}
+
+const ERROR_SUCCESS: i32 = 0;
 
 mod guid {
     pub const _SENSOR_CRT_TEMP: uuid::Uuid = uuid::uuid!("218246e7-baf6-45f1-aa13-07e4845256b8");
@@ -105,6 +121,7 @@ pub struct AcpiMethodArgumentV1 {
 pub enum AcpiParseError {
     InsufficientLength,
     InvalidFormat,
+    EvaluationFailed(i32),
 }
 
 pub const ACPI_EVAL_INPUT_BUFFER_COMPLEX_SIGNATURE_EX: u32 = u32::from_le_bytes(*b"AeiF");
@@ -240,7 +257,7 @@ impl Acpi {
         let mut out_buf_len = 1024;
         let mut out_buf = vec![0u8; out_buf_len];
 
-        let _res = unsafe {
+        let res = unsafe {
             EvaluateAcpi(
                 in_buf.as_ptr() as *const i8,
                 in_buf_len,
@@ -249,7 +266,32 @@ impl Acpi {
             )
         };
 
-        AcpiEvalOutputBufferV1::try_from(out_buf)
+        match res {
+            ERROR_SUCCESS => AcpiEvalOutputBufferV1::try_from(out_buf),
+            err => Err(AcpiParseError::EvaluationFailed(err)),
+        }
+    }
+
+    /// Evaluates the provided method with the provided arguments and returns its single u32 result.
+    /// Errors if the result is not a single u32.
+    pub fn evaluate_u32(name: &str, args: Option<&[AcpiMethodArgument]>) -> Result<u32> {
+        let output = Acpi::evaluate(name, args)?;
+
+        if output.count != 1 {
+            Err(eyre!(
+                "{} returned unexpected number of arguments: {}",
+                name,
+                output.count
+            ))
+        } else if output.arguments[0].type_ != AcpiArgumentType::Integer as u16 {
+            Err(eyre!(
+                "{} returned argument of unexpected type: {}",
+                name,
+                output.arguments[0].type_
+            ))
+        } else {
+            Ok(output.arguments[0].data_32)
+        }
     }
 }
 
@@ -371,5 +413,55 @@ impl Source for Acpi {
         // No return value is expected according to ACPI spec
         let _ = Acpi::evaluate("\\_SB.ECT0.TBTP", Some(&[AcpiMethodArgument::Int(trippoint)]))?;
         Ok(())
+    }
+}
+
+impl RtcSource for Acpi {
+    fn get_capabilities(&self) -> Result<TimeAlarmDeviceCapabilities> {
+        Ok(TimeAlarmDeviceCapabilities(Acpi::evaluate_u32(
+            "\\_SB.ECT0._GCP",
+            None,
+        )?))
+    }
+
+    fn get_real_time(&self) -> Result<AcpiTimestamp> {
+        let result = Acpi::evaluate("\\_SB.ECT0._GRT", None)?;
+        if result.count != 1 {
+            return Err(eyre!("GET_REAL_TIME unrecognized output - got result {:?}", result));
+        }
+
+        let result = &result.arguments[0];
+        if result.type_ != AcpiArgumentType::Buffer as u16 {
+            return Err(eyre!("GET_REAL_TIME invalid output type {}", result.type_));
+        }
+
+        AcpiTimestamp::try_from_bytes(result.data.as_slice()).map_err(|e| {
+            eyre!(
+                "GET_REAL_TIME invalid output format: {:?} for bytes {:?}",
+                e,
+                result.data.as_slice()
+            )
+        })
+    }
+
+    fn get_wake_status(&self, timer_id: AcpiTimerId) -> Result<TimerStatus> {
+        Ok(TimerStatus(Acpi::evaluate_u32(
+            "\\_SB.ECT0._GWS",
+            Some(&[AcpiMethodArgument::Int(timer_id.into())]),
+        )?))
+    }
+
+    fn get_expired_timer_wake_policy(&self, timer_id: AcpiTimerId) -> Result<AlarmExpiredWakePolicy> {
+        Ok(AlarmExpiredWakePolicy(Acpi::evaluate_u32(
+            "\\_SB.ECT0._TIP",
+            Some(&[AcpiMethodArgument::Int(timer_id.into())]),
+        )?))
+    }
+
+    fn get_timer_value(&self, timer_id: AcpiTimerId) -> Result<AlarmTimerSeconds> {
+        Ok(AlarmTimerSeconds(Acpi::evaluate_u32(
+            "\\_SB.ECT0._TIV",
+            Some(&[AcpiMethodArgument::Int(timer_id.into())]),
+        )?))
     }
 }

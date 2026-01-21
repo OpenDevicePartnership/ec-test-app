@@ -36,6 +36,9 @@ SOFTWARE.
 #include "..\inc\eclib.h"
 #include "..\inc\ectest.h"
 
+#include <wil/resource.h>
+#include <wil/result.h>
+
 #define MAX_DEVPATH_LENGTH  64
 
 // GUID defined in the KMDF INX file for ectest.sys
@@ -195,34 +198,31 @@ int EvaluateAcpi(
 
     // Look up handle to ACPI entry
     wchar_t* dpath = GetGUIDPath(GUID_DEVCLASS_ECTEST, L"ETST0001", pathbuf, sizeof(pathbuf));
-    if (dpath == NULL) {
+    if (dpath == nullptr) {
         return ERROR_INVALID_PARAMETER;
     }
 
-    HANDLE hDevice = CreateFile(dpath,
+    wil::unique_handle hDevice(CreateFile(dpath,
         GENERIC_READ | GENERIC_WRITE,
         FILE_SHARE_READ | FILE_SHARE_WRITE,
         NULL,
         OPEN_EXISTING,
         0,
-        NULL);
+        NULL));
 
-    if (hDevice != INVALID_HANDLE_VALUE) {
-        if( DeviceIoControl(hDevice,
-            (DWORD)IOCTL_ACPI_EVAL_METHOD_EX,
-            acpi_input,
-            (DWORD)input_len,
-            buffer,
-            (DWORD)*buf_len,
-            &bytesReturned,
-            NULL) == TRUE ) 
-        {
-            *buf_len = bytesReturned;
-            return ERROR_SUCCESS;
-        }
-    }
+    RETURN_LAST_ERROR_IF(!hDevice.is_valid());
+    RETURN_IF_WIN32_BOOL_FALSE(DeviceIoControl(
+        hDevice.get(),
+        static_cast<DWORD>(IOCTL_ACPI_EVAL_METHOD_EX),
+        acpi_input,
+        static_cast<DWORD>(input_len),
+        buffer,
+        static_cast<DWORD>(*buf_len),
+        &bytesReturned,
+        nullptr));
 
-    return ERROR_INVALID_PARAMETER;
+    *buf_len = bytesReturned;
+    return ERROR_SUCCESS;
 }
 
 /*
@@ -314,7 +314,7 @@ UINT32 WaitForNotification(UINT32 event)
     // Make sure Initialization has been done
     if(g_notify.handle == INVALID_HANDLE_VALUE) {
         return 0;
-    }   
+    }
 
     // Loop until we get event we are looking for
     for(;;) {
