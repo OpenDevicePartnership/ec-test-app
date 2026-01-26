@@ -1,4 +1,5 @@
 use crate::common;
+use color_eyre::Result;
 use crossterm::event::Event;
 use embedded_mcu_hal::time::Datetime;
 use ratatui::{
@@ -15,61 +16,85 @@ use crate::app::Module;
 use crate::{RtcSource, Source};
 
 const LABEL_COLOR: Color = tailwind::SLATE.c200;
+const DATA_NOT_YET_RETRIEVED_MSG: &str = "Data not yet retrieved";
 
 mod rtc_timer {
     use super::*;
     pub struct RtcTimer {
         timer_id: AcpiTimerId,
 
-        value: AlarmTimerSeconds,
-        wake_policy: AlarmExpiredWakePolicy,
-        timer_status: TimerStatus,
+        value: Result<AlarmTimerSeconds>,
+        wake_policy: Result<AlarmExpiredWakePolicy>,
+        timer_status: Result<TimerStatus>,
     }
 
     impl RtcTimer {
-        pub fn update(&mut self, source: &impl RtcSource) -> color_eyre::Result<()> {
-            self.value = source.get_timer_value(self.timer_id)?;
-            self.wake_policy = source.get_expired_timer_wake_policy(self.timer_id)?;
-            self.timer_status = source.get_wake_status(self.timer_id)?;
-            Ok(())
+        pub fn update(&mut self, source: &impl RtcSource) {
+            self.value = source.get_timer_value(self.timer_id);
+            self.wake_policy = source.get_expired_timer_wake_policy(self.timer_id);
+            self.timer_status = source.get_wake_status(self.timer_id);
         }
 
         pub fn new(timer_id: AcpiTimerId) -> Self {
             Self {
                 timer_id,
-                value: AlarmTimerSeconds::DISABLED,
-                wake_policy: AlarmExpiredWakePolicy::INSTANTLY,
-                timer_status: TimerStatus::default(),
+                value: Err(color_eyre::eyre::eyre!(DATA_NOT_YET_RETRIEVED_MSG)),
+                wake_policy: Err(color_eyre::eyre::eyre!(DATA_NOT_YET_RETRIEVED_MSG)),
+                timer_status: Err(color_eyre::eyre::eyre!(DATA_NOT_YET_RETRIEVED_MSG)),
             }
         }
 
         pub fn render(&self, title: &str, area: Rect, buf: &mut Buffer) {
+            let is_healthy = self.value.is_ok() && self.wake_policy.is_ok() && self.timer_status.is_ok();
+            let title = common::title_str_with_status(title, is_healthy);
+
             Paragraph::new(vec![
-                Line::raw(format!(
-                    "Time remaining:       {}",
-                    match self.value {
+                Line::raw(format_result(
+                    "Time remaining: ",
+                    &self.value,
+                    |value| match *value {
                         AlarmTimerSeconds::DISABLED => "Timer not set".to_string(),
                         seconds => format!("{} seconds", seconds.0),
-                    }
+                    },
                 )),
-                Line::raw(format!(
-                    "Wake policy:          {}",
-                    match self.wake_policy {
+                Line::raw(format_result(
+                    "Wake policy:    ",
+                    &self.wake_policy,
+                    |wake_policy| match *wake_policy {
                         AlarmExpiredWakePolicy::NEVER => "never".to_string(),
                         AlarmExpiredWakePolicy::INSTANTLY => "instantly".to_string(),
                         wake_policy => format!("after {} seconds", wake_policy.0),
-                    }
+                    },
                 )),
-                Line::raw(format!("Timer expired:        {}", self.timer_status.timer_expired())),
-                Line::raw(format!(
-                    "Timer triggered wake: {}",
-                    self.timer_status.timer_triggered_wake()
+                Line::raw(format_result(
+                    "Timer status:   ",
+                    &self.timer_status,
+                    |timer_status| {
+                        format!("{}, {}",
+                        if timer_status.timer_expired() {
+                            "expired".to_string()
+                        } else {
+                            "not expired".to_string()
+                        },
+                        if timer_status.timer_triggered_wake() {
+                            "triggered wake".to_string()
+                        } else {
+                            "did not trigger wake".to_string()
+                        })
+                    },
                 )),
             ])
-            .block(common::title_block(title, 0, LABEL_COLOR))
+            .block(common::title_block(&title, 0, LABEL_COLOR))
             .render(area, buf);
         }
     }
+
+    fn format_result<T>(label: &str, res: &Result<T>, f: impl FnOnce(&T) -> String) -> String {
+    match res {
+        Ok(value) => format!("{}{}", label, f(value)),
+        Err(err) => format!("{}Error: {}", label, err),
+    }
+}
 }
 
 use rtc_timer::RtcTimer;
@@ -78,8 +103,8 @@ pub struct Rtc<S: Source> {
     source: S,
     timers: [RtcTimer; 2],
 
-    capabilities: TimeAlarmDeviceCapabilities,
-    timestamp: AcpiTimestamp,
+    capabilities: Result<TimeAlarmDeviceCapabilities>,
+    timestamp: Result<AcpiTimestamp>,
 }
 
 impl<S: Source> Module for Rtc<S> {
@@ -88,32 +113,48 @@ impl<S: Source> Module for Rtc<S> {
     }
 
     fn update(&mut self) {
-        self.timestamp = self.source.get_real_time().unwrap();
+        // Capabilities should be static, so don't try to update after a successful fetch
+        if !self.capabilities.is_ok() {
+            self.capabilities = self.source.get_capabilities();
+        }
+        self.timestamp = self.source.get_real_time();
         for timer in &mut self.timers {
-            timer.update(&self.source).unwrap();
+            timer.update(&self.source);
         }
     }
 
     fn handle_event(&mut self, _evt: &Event) {}
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        let title = common::title_block("Real-time Clock", 0, LABEL_COLOR);
+        let is_healthy = self.capabilities.is_ok() && self.timestamp.is_ok();
+        let title = common::title_str_with_status("Real-time Clock", is_healthy);
+        let title = common::title_block(&title, 0, LABEL_COLOR);
 
         let [general_area, timers_area] = common::area_split(area, Direction::Vertical, 70, 30);
         let [ac_area, dc_area] = common::area_split(timers_area, Direction::Horizontal, 50, 50);
-        let general_messages = vec![
-            format!("Time:      {}", format_time(self.timestamp.datetime)),
-            format!("Time Zone: {}", format_time_zone(self.timestamp.time_zone)),
-            format!("DST:       {}", format_dst(self.timestamp.dst_status)),
-            "".to_string(),
-        ];
 
-        let general_messages: Vec<Line<'_>> = general_messages
+        let time_messages = match &self.timestamp {
+            Ok(timestamp) => vec![
+                format!("Time:      {}", format_time(timestamp.datetime)),
+                format!("Time Zone: {}", format_time_zone(timestamp.time_zone)),
+                format!("DST:       {}", format_dst(timestamp.dst_status)),
+                "".to_string(),
+            ],
+            Err(err) => vec![format!("Error retrieving RTC time: {}", err)],
+        };
+
+        let capabilities_messages: Vec<String> = match &self.capabilities {
+            Ok(capabilities) => format_capabilities(&capabilities),
+            Err(err) => vec![format!("Error retrieving RTC capabilities: {}", err)],
+        };
+
+        let all_messages: Vec<Line<'_>> = time_messages
             .into_iter()
-            .chain(format_capabilities(self.capabilities).into_iter())
+            .chain(capabilities_messages.into_iter())
             .map(|line| Line::raw(line))
             .collect();
-        Paragraph::new(general_messages).block(title).render(general_area, buf);
+
+        Paragraph::new(all_messages).block(title).render(general_area, buf);
 
         self.get_timer(AcpiTimerId::AcPower)
             .render("AC Power Timer", ac_area, buf);
@@ -130,7 +171,7 @@ fn format_dst(dst: AcpiDaylightSavingsTimeStatus) -> &'static str {
     }
 }
 
-fn format_capabilities(capabilities: TimeAlarmDeviceCapabilities) -> Vec<String> {
+fn format_capabilities(capabilities: &TimeAlarmDeviceCapabilities) -> Vec<String> {
     fn as_supported(supported: bool) -> &'static str {
         if supported { "Supported" } else { "Not Supported" }
     }
@@ -204,16 +245,10 @@ fn format_time_zone(tz: AcpiTimeZone) -> String {
 
 impl<S: Source> Rtc<S> {
     pub fn new(source: S) -> Self {
-        let capabilities = source.get_capabilities().unwrap();
-
         let mut result = Self {
             source,
-            capabilities,
-            timestamp: AcpiTimestamp {
-                datetime: Default::default(),
-                time_zone: AcpiTimeZone::Unknown,
-                dst_status: AcpiDaylightSavingsTimeStatus::NotObserved,
-            },
+            capabilities: Err(color_eyre::eyre::eyre!(DATA_NOT_YET_RETRIEVED_MSG)),
+            timestamp: Err(color_eyre::eyre::eyre!(DATA_NOT_YET_RETRIEVED_MSG)),
             timers: [RtcTimer::new(AcpiTimerId::AcPower), RtcTimer::new(AcpiTimerId::DcPower)],
         };
 
