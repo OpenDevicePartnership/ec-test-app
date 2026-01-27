@@ -49,14 +49,10 @@ mod rtc_timer {
             let title = common::title_str_with_status(title, is_healthy);
 
             Paragraph::new(vec![
-                Line::raw(format_result(
-                    "Time remaining: ",
-                    &self.value,
-                    |value| match *value {
-                        AlarmTimerSeconds::DISABLED => "Timer not set".to_string(),
-                        seconds => format!("{} seconds", seconds.0),
-                    },
-                )),
+                Line::raw(format_result("Time remaining: ", &self.value, |value| match *value {
+                    AlarmTimerSeconds::DISABLED => "Timer not set".to_string(),
+                    seconds => format!("{} seconds", seconds.0),
+                })),
                 Line::raw(format_result(
                     "Wake policy:    ",
                     &self.wake_policy,
@@ -66,11 +62,9 @@ mod rtc_timer {
                         wake_policy => format!("after {} seconds", wake_policy.0),
                     },
                 )),
-                Line::raw(format_result(
-                    "Timer status:   ",
-                    &self.timer_status,
-                    |timer_status| {
-                        format!("{}, {}",
+                Line::raw(format_result("Timer status:   ", &self.timer_status, |timer_status| {
+                    format!(
+                        "{}, {}",
                         if timer_status.timer_expired() {
                             "expired".to_string()
                         } else {
@@ -80,9 +74,9 @@ mod rtc_timer {
                             "triggered wake".to_string()
                         } else {
                             "did not trigger wake".to_string()
-                        })
-                    },
-                )),
+                        }
+                    )
+                })),
             ])
             .block(common::title_block(&title, 0, LABEL_COLOR))
             .render(area, buf);
@@ -90,11 +84,11 @@ mod rtc_timer {
     }
 
     fn format_result<T>(label: &str, res: &Result<T>, f: impl FnOnce(&T) -> String) -> String {
-    match res {
-        Ok(value) => format!("{}{}", label, f(value)),
-        Err(err) => format!("{}Error: {}", label, err),
+        match res {
+            Ok(value) => format!("{}{}", label, f(value)),
+            Err(err) => format!("{}Error: {}", label, err),
+        }
     }
-}
 }
 
 use rtc_timer::RtcTimer;
@@ -114,7 +108,7 @@ impl<S: Source> Module for Rtc<S> {
 
     fn update(&mut self) {
         // Capabilities should be static, so don't try to update after a successful fetch
-        if !self.capabilities.is_ok() {
+        if self.capabilities.is_err() {
             self.capabilities = self.source.get_capabilities();
         }
         self.timestamp = self.source.get_real_time();
@@ -144,14 +138,14 @@ impl<S: Source> Module for Rtc<S> {
         };
 
         let capabilities_messages: Vec<String> = match &self.capabilities {
-            Ok(capabilities) => format_capabilities(&capabilities),
+            Ok(capabilities) => format_capabilities(capabilities),
             Err(err) => vec![format!("Error retrieving RTC capabilities: {}", err)],
         };
 
         let all_messages: Vec<Line<'_>> = time_messages
             .into_iter()
-            .chain(capabilities_messages.into_iter())
-            .map(|line| Line::raw(line))
+            .chain(capabilities_messages)
+            .map(Line::raw)
             .collect();
 
         Paragraph::new(all_messages).block(title).render(general_area, buf);
