@@ -30,6 +30,3 @@ suspicious = "forbid"
 correctness = "forbid"
 perf = "forbid"
 style = "forbid"
-
-[patch."https://github.com/OpenDevicePartnership/embedded-services"]
-time-alarm-service-messages = { path = "../../embedded-services/time-alarm-service-messages" }
