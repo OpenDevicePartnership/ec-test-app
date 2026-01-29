@@ -19,7 +19,7 @@ pub mod ucsi;
 pub mod widgets;
 
 /// Trait implemented by all data sources
-pub trait Source: Clone {
+pub trait Source: Clone + RtcSource {
     /// Get current temperature
     fn get_temperature(&self) -> Result<f64>;
 
@@ -46,9 +46,9 @@ pub trait Source: Clone {
 
     /// Set battery trippoint
     fn set_btp(&self, trippoint: u32) -> Result<()>;
+}
 
-    // RTC methods
-
+pub trait RtcSource: Clone {
     /// Get RTC capabilities bitfield - see _GCP
     fn get_capabilities(&self) -> Result<TimeAlarmDeviceCapabilities>;
 

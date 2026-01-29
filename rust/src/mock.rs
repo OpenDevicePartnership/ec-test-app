@@ -1,4 +1,4 @@
-use crate::{Source, Threshold, common};
+use crate::{RtcSource, Source, Threshold, common};
 use color_eyre::Result;
 use embedded_mcu_hal::time::{Datetime, Month, UncheckedDatetime};
 use std::sync::{
@@ -148,27 +148,6 @@ impl Source for Mock {
         // Do nothing for mock
         Ok(())
     }
-
-    /// RTC methods
-    fn get_capabilities(&self) -> Result<TimeAlarmDeviceCapabilities> {
-        Ok(TimeAlarmDeviceCapabilities(0xF7))
-    }
-
-    fn get_real_time(&self) -> Result<AcpiTimestamp> {
-        Ok(self.rtc.time)
-    }
-
-    fn get_wake_status(&self, timer_id: AcpiTimerId) -> Result<TimerStatus> {
-        Ok(self.rtc.get_timer(timer_id).timer_status)
-    }
-
-    fn get_expired_timer_wake_policy(&self, timer_id: AcpiTimerId) -> Result<AlarmExpiredWakePolicy> {
-        Ok(self.rtc.get_timer(timer_id).wake_policy)
-    }
-
-    fn get_timer_value(&self, timer_id: AcpiTimerId) -> Result<AlarmTimerSeconds> {
-        Ok(self.rtc.get_timer(timer_id).value)
-    }
 }
 
 #[derive(Copy, Clone)]
@@ -222,5 +201,27 @@ impl MockRtc {
 impl Default for MockRtc {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl RtcSource for Mock {
+    fn get_capabilities(&self) -> Result<TimeAlarmDeviceCapabilities> {
+        Ok(TimeAlarmDeviceCapabilities(0xF7))
+    }
+
+    fn get_real_time(&self) -> Result<AcpiTimestamp> {
+        Ok(self.rtc.time)
+    }
+
+    fn get_wake_status(&self, timer_id: AcpiTimerId) -> Result<TimerStatus> {
+        Ok(self.rtc.get_timer(timer_id).timer_status)
+    }
+
+    fn get_expired_timer_wake_policy(&self, timer_id: AcpiTimerId) -> Result<AlarmExpiredWakePolicy> {
+        Ok(self.rtc.get_timer(timer_id).wake_policy)
+    }
+
+    fn get_timer_value(&self, timer_id: AcpiTimerId) -> Result<AlarmTimerSeconds> {
+        Ok(self.rtc.get_timer(timer_id).value)
     }
 }
