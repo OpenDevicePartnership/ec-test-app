@@ -13,7 +13,7 @@ use time_alarm_service_messages::{
 };
 
 use crate::app::Module;
-use crate::{RtcSource, Source};
+use crate::{Source};
 
 const LABEL_COLOR: Color = tailwind::SLATE.c200;
 const DATA_NOT_YET_RETRIEVED_MSG: &str = "Data not yet retrieved";
@@ -29,7 +29,7 @@ mod rtc_timer {
     }
 
     impl RtcTimer {
-        pub fn update(&mut self, source: &impl RtcSource) {
+        pub fn update(&mut self, source: &impl Source) {
             self.value = source.get_timer_value(self.timer_id);
             self.wake_policy = source.get_expired_timer_wake_policy(self.timer_id);
             self.timer_status = source.get_wake_status(self.timer_id);

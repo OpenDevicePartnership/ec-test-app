@@ -1,4 +1,4 @@
-use crate::{RtcSource, Source, Threshold, common};
+use crate::{Source, Threshold, common};
 use color_eyre::{Result, eyre::eyre};
 use std::ffi;
 use time_alarm_service_messages::{
@@ -414,9 +414,8 @@ impl Source for Acpi {
         let _ = Acpi::evaluate("\\_SB.ECT0.TBTP", Some(&[AcpiMethodArgument::Int(trippoint)]))?;
         Ok(())
     }
-}
 
-impl RtcSource for Acpi {
+    // RTC methods
     fn get_capabilities(&self) -> Result<TimeAlarmDeviceCapabilities> {
         Ok(TimeAlarmDeviceCapabilities(Acpi::evaluate_u32(
             "\\_SB.ECT0._GCP",
