@@ -13,11 +13,14 @@ rust-version = "1.85"
 crossterm = "0.28.1"
 ratatui = "0.29.0"
 color-eyre = "0.6.3"
+num_enum = { version = "0.7.5", default-features = false }
 strum = { version = "0.27", default-features = false, features = ["derive"] }
 log = "0.4"
 env_logger = "0.10"
 tui-input = "0.14.0"
 uuid = { version = "1.17.0", default-features = false }
+time-alarm-service-messages = { git = "https://github.com/OpenDevicePartnership/embedded-services", branch = "v0.2.0" }
+embedded-mcu-hal = { git = "https://github.com/OpenDevicePartnership/embedded-mcu" }
 
 [features]
 mock = []

@@ -77,12 +77,13 @@ impl<S: Source + Clone + 'static> App<S> {
 
         let thermal_source = Rc::clone(&source);
         let battery_source = Rc::clone(&source);
+        let rtc_source = Rc::clone(&source);
 
         modules.insert(
             SelectedTab::TabThermal,
             Box::new(Thermal::new(thermal_source.borrow().clone())),
         );
-        modules.insert(SelectedTab::TabRTC, Box::new(Rtc::new()));
+        modules.insert(SelectedTab::TabRTC, Box::new(Rtc::new(rtc_source.borrow().clone())));
         modules.insert(SelectedTab::TabUCSI, Box::new(Ucsi::new()));
         modules.insert(
             SelectedTab::TabBattery,

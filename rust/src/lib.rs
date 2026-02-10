@@ -1,5 +1,9 @@
 use color_eyre::Result;
 
+use time_alarm_service_messages::{
+    AcpiTimerId, AcpiTimestamp, AlarmExpiredWakePolicy, AlarmTimerSeconds, TimeAlarmDeviceCapabilities, TimerStatus,
+};
+
 #[cfg(not(feature = "mock"))]
 pub mod acpi;
 
@@ -15,7 +19,7 @@ pub mod ucsi;
 pub mod widgets;
 
 /// Trait implemented by all data sources
-pub trait Source: Clone {
+pub trait Source: Clone + RtcSource {
     /// Get current temperature
     fn get_temperature(&self) -> Result<f64>;
 
@@ -42,6 +46,23 @@ pub trait Source: Clone {
 
     /// Set battery trippoint
     fn set_btp(&self, trippoint: u32) -> Result<()>;
+}
+
+pub trait RtcSource: Clone {
+    /// Get RTC capabilities bitfield - see _GCP
+    fn get_capabilities(&self) -> Result<TimeAlarmDeviceCapabilities>;
+
+    /// Get RTC time as unix timestamp - see _GRT
+    fn get_real_time(&self) -> Result<AcpiTimestamp>;
+
+    /// Query the wake status of the timer - see _GWS
+    fn get_wake_status(&self, timer_id: AcpiTimerId) -> Result<TimerStatus>;
+
+    /// Get the expired timer wake policy - see _TIP
+    fn get_expired_timer_wake_policy(&self, timer_id: AcpiTimerId) -> Result<AlarmExpiredWakePolicy>;
+
+    /// Get the timer value - see _TIV
+    fn get_timer_value(&self, timer_id: AcpiTimerId) -> Result<AlarmTimerSeconds>;
 }
 
 pub enum Threshold {

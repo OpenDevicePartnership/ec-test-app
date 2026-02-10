@@ -24,7 +24,13 @@ SOFTWARE.
 
 #pragma once
 
-#define ECLIB_API __declspec(dllexport)
+#ifdef __cplusplus
+#define EXTERN_C extern "C"
+#else
+#define EXTERN_C
+#endif
+
+#define ECLIB_API EXTERN_C __declspec(dllexport)
 
 ECLIB_API int GetKMDFDriverHandle(
     _In_ DWORD flags,

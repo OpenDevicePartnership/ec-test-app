@@ -1,16 +1,23 @@
-use crate::{Source, Threshold, common};
+use crate::{RtcSource, Source, Threshold, common};
 use color_eyre::Result;
+use embedded_mcu_hal::time::{Datetime, Month, UncheckedDatetime};
 use std::sync::{
     Mutex, OnceLock,
     atomic::Ordering,
     atomic::{AtomicI64, AtomicU32},
+};
+use time_alarm_service_messages::{
+    AcpiDaylightSavingsTimeStatus, AcpiTimeZone, AcpiTimeZoneOffset, AcpiTimerId, AcpiTimestamp,
+    AlarmExpiredWakePolicy, AlarmTimerSeconds, TimeAlarmDeviceCapabilities, TimerStatus,
 };
 
 static SET_RPM: AtomicI64 = AtomicI64::new(-1);
 static SAMPLE: OnceLock<Mutex<(i64, i64)>> = OnceLock::new();
 
 #[derive(Default, Copy, Clone)]
-pub struct Mock {}
+pub struct Mock {
+    rtc: MockRtc,
+}
 
 impl Mock {
     pub fn new() -> Self {
@@ -140,5 +147,81 @@ impl Source for Mock {
     fn set_btp(&self, _trippoint: u32) -> Result<()> {
         // Do nothing for mock
         Ok(())
+    }
+}
+
+#[derive(Copy, Clone)]
+struct MockRtc {
+    time: AcpiTimestamp,
+    timers: [MockRtcTimer; 2],
+}
+
+#[derive(Copy, Clone)]
+struct MockRtcTimer {
+    value: AlarmTimerSeconds,
+    wake_policy: AlarmExpiredWakePolicy,
+    timer_status: TimerStatus,
+}
+
+impl Default for MockRtcTimer {
+    fn default() -> Self {
+        Self {
+            value: AlarmTimerSeconds(0),
+            wake_policy: AlarmExpiredWakePolicy::INSTANTLY,
+            timer_status: TimerStatus(0),
+        }
+    }
+}
+
+impl MockRtc {
+    fn new() -> Self {
+        Self {
+            time: AcpiTimestamp {
+                datetime: Datetime::new(UncheckedDatetime {
+                    year: 2026,
+                    month: Month::January,
+                    day: 1,
+                    ..Default::default()
+                })
+                .expect("statically known valid datetime"),
+                time_zone: AcpiTimeZone::MinutesFromUtc(
+                    AcpiTimeZoneOffset::new(-8 * 60).expect("statically known valid timezone"),
+                ),
+                dst_status: AcpiDaylightSavingsTimeStatus::NotObserved,
+            },
+            timers: [MockRtcTimer::default(); 2],
+        }
+    }
+
+    fn get_timer(&self, timer_id: AcpiTimerId) -> &MockRtcTimer {
+        &self.timers[timer_id as usize]
+    }
+}
+
+impl Default for MockRtc {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RtcSource for Mock {
+    fn get_capabilities(&self) -> Result<TimeAlarmDeviceCapabilities> {
+        Ok(TimeAlarmDeviceCapabilities(0xF7))
+    }
+
+    fn get_real_time(&self) -> Result<AcpiTimestamp> {
+        Ok(self.rtc.time)
+    }
+
+    fn get_wake_status(&self, timer_id: AcpiTimerId) -> Result<TimerStatus> {
+        Ok(self.rtc.get_timer(timer_id).timer_status)
+    }
+
+    fn get_expired_timer_wake_policy(&self, timer_id: AcpiTimerId) -> Result<AlarmExpiredWakePolicy> {
+        Ok(self.rtc.get_timer(timer_id).wake_policy)
+    }
+
+    fn get_timer_value(&self, timer_id: AcpiTimerId) -> Result<AlarmTimerSeconds> {
+        Ok(self.rtc.get_timer(timer_id).value)
     }
 }
