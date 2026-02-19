@@ -2,7 +2,10 @@ use crate::Source;
 use crate::app::Module;
 use crate::common;
 use crate::widgets::battery;
-use color_eyre::{Report, Result, eyre::eyre};
+use battery_service_messages::{
+    BatteryState, BatterySwapCapability, BatteryTechnology, BixFixedStrings, BstReturn, PowerUnit,
+};
+use core::ffi::CStr;
 
 use ratatui::style::Modifier;
 use ratatui::text::Text;
@@ -23,160 +26,52 @@ const BATGAUGE_COLOR_LOW: Color = tailwind::RED.c500;
 const LABEL_COLOR: Color = tailwind::SLATE.c200;
 const MAX_SAMPLES: usize = 60;
 
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum ChargeState {
-    #[default]
-    Charging,
-    Discharging,
+fn str_from_bytes(bytes: &[u8]) -> String {
+    CStr::from_bytes_until_nul(bytes)
+        .ok()
+        .and_then(|c| c.to_str().ok())
+        .unwrap_or("Invalid")
+        .to_owned()
 }
 
-impl TryFrom<u32> for ChargeState {
-    type Error = Report;
-    fn try_from(value: u32) -> Result<Self> {
-        match value {
-            1 => Ok(Self::Discharging),
-            2 => Ok(Self::Charging),
-            _ => Err(eyre!("Unknown charging state")),
-        }
+fn charge_state_as_str(state: BatteryState) -> &'static str {
+    if state.contains(BatteryState::DISCHARGING) {
+        "Discharging"
+    } else {
+        "Charging"
     }
 }
 
-impl ChargeState {
-    fn as_str(&self) -> &'static str {
-        match self {
-            Self::Charging => "Charging",
-            Self::Discharging => "Discharging",
-        }
+fn power_unit_as_capacity_str(power_unit: PowerUnit) -> &'static str {
+    match power_unit {
+        PowerUnit::MilliWatts => "mWh",
+        PowerUnit::MilliAmps => "mAh",
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum PowerUnit {
-    #[default]
-    Mw,
-    Ma,
-}
-
-impl TryFrom<u32> for PowerUnit {
-    type Error = Report;
-    fn try_from(value: u32) -> Result<Self> {
-        match value {
-            0 => Ok(Self::Mw),
-            1 => Ok(Self::Ma),
-            _ => Err(eyre!("Unknown power unit")),
-        }
+fn power_unit_as_rate_str(power_unit: PowerUnit) -> &'static str {
+    match power_unit {
+        PowerUnit::MilliWatts => "mW",
+        PowerUnit::MilliAmps => "mA",
     }
 }
 
-impl PowerUnit {
-    fn as_capacity_str(&self) -> &'static str {
-        match self {
-            Self::Mw => "mWh",
-            Self::Ma => "mAh",
-        }
-    }
-
-    fn as_rate_str(&self) -> &'static str {
-        match self {
-            Self::Mw => "mW",
-            Self::Ma => "mA",
-        }
+fn bat_tech_as_str(bat_tech: BatteryTechnology) -> &'static str {
+    match bat_tech {
+        BatteryTechnology::Primary => "Primary",
+        BatteryTechnology::Secondary => "Secondary",
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum BatteryTechnology {
-    #[default]
-    Primary,
-    Secondary,
-}
-
-impl TryFrom<u32> for BatteryTechnology {
-    type Error = Report;
-    fn try_from(value: u32) -> Result<Self> {
-        match value {
-            0 => Ok(Self::Primary),
-            1 => Ok(Self::Secondary),
-            _ => Err(eyre!("Unknown battery technology")),
-        }
+fn swap_cap_as_str(swap_cap: BatterySwapCapability) -> &'static str {
+    match swap_cap {
+        BatterySwapCapability::NonSwappable => "Non swappable",
+        BatterySwapCapability::ColdSwappable => "Cold swappable",
+        BatterySwapCapability::HotSwappable => "Hot swappable",
     }
 }
 
-impl BatteryTechnology {
-    fn as_str(&self) -> &'static str {
-        match self {
-            Self::Primary => "Primary",
-            Self::Secondary => "Secondary",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum SwapCap {
-    #[default]
-    NonSwappable,
-    ColdSwappable,
-    HotSwappable,
-}
-
-impl TryFrom<u32> for SwapCap {
-    type Error = Report;
-    fn try_from(value: u32) -> Result<Self> {
-        match value {
-            0 => Ok(Self::NonSwappable),
-            1 => Ok(Self::ColdSwappable),
-            2 => Ok(Self::HotSwappable),
-            _ => Err(eyre!("Unknown swapping capability")),
-        }
-    }
-}
-
-impl SwapCap {
-    fn as_str(&self) -> &'static str {
-        match self {
-            Self::NonSwappable => "Non swappable",
-            Self::ColdSwappable => "Cold swappable",
-            Self::HotSwappable => "Hot swappable",
-        }
-    }
-}
-
-/// BST: ACPI Battery Status
-#[derive(Default)]
-pub struct BstData {
-    pub state: ChargeState,
-    pub rate: u32,
-    pub capacity: u32,
-    pub voltage: u32,
-}
-
-/// BIX: ACPI Battery Information eXtended
-#[derive(Default)]
-pub struct BixData {
-    pub revision: u32,
-    pub power_unit: PowerUnit, // 0 - mW, 1 - mA
-    pub design_capacity: u32,
-    pub last_full_capacity: u32,
-    pub battery_technology: BatteryTechnology, // 0 - primary, 1 - secondary
-    pub design_voltage: u32,
-    pub warning_capacity: u32,
-    pub low_capacity: u32,
-    pub cycle_count: u32,
-    pub accuracy: u32, // Thousands of a percent
-    pub max_sample_time: u32,
-    pub min_sample_time: u32, // Milliseconds
-    pub max_average_interval: u32,
-    pub min_average_interval: u32,
-    pub capacity_gran1: u32,
-    pub capacity_gran2: u32,
-    pub model_number: String,
-    pub serial_number: String,
-    pub battery_type: String,
-    pub oem_info: String,
-    pub swap_cap: SwapCap,
-}
-
-struct BatteryState {
+struct BatteryTabState {
     btp: u32,
     btp_input: Input,
     bst_success: bool,
@@ -185,7 +80,7 @@ struct BatteryState {
     samples: common::SampleBuf<u32, MAX_SAMPLES>,
 }
 
-impl Default for BatteryState {
+impl Default for BatteryTabState {
     fn default() -> Self {
         Self {
             btp: 0,
@@ -200,9 +95,9 @@ impl Default for BatteryState {
 
 #[derive(Default)]
 pub struct Battery<S: Source> {
-    bst_data: BstData,
-    bix_data: BixData,
-    state: BatteryState,
+    bst_data: BstReturn,
+    bix_data: BixFixedStrings,
+    state: BatteryTabState,
     t_sec: usize,
     t_min: usize,
     source: S,
@@ -225,11 +120,11 @@ impl<S: Source> Module for Battery<S> {
         #[cfg(feature = "mock")]
         let update_graph = true;
         #[cfg(not(feature = "mock"))]
-        let update_graph = (self.t_sec % 60) == 0;
+        let update_graph = self.t_sec.is_multiple_of(60);
 
         self.t_sec += 1;
         if update_graph {
-            self.state.samples.insert(self.bst_data.capacity);
+            self.state.samples.insert(self.bst_data.battery_remaining_capacity);
             self.t_min += 1;
         }
     }
@@ -309,7 +204,7 @@ impl<S: Source> Battery<S> {
             x_axis: "Time (m)".to_string(),
             x_bounds: [0.0, 60.0],
             x_labels: common::time_labels(self.t_min, MAX_SAMPLES),
-            y_axis: format!("Capacity ({})", self.bix_data.power_unit.as_capacity_str()),
+            y_axis: format!("Capacity ({})", power_unit_as_capacity_str(self.bix_data.power_unit)),
             y_bounds: [0.0, self.bix_data.design_capacity as f64],
             y_labels,
         };
@@ -326,19 +221,29 @@ impl<S: Source> Battery<S> {
             ]),
             Row::new(vec![
                 Text::raw("Power Unit").add_modifier(Modifier::BOLD),
-                format!("{}", self.bix_data.power_unit.as_rate_str()).into(),
+                power_unit_as_rate_str(power_unit).into(),
             ]),
             Row::new(vec![
                 Text::raw("Design Capacity").add_modifier(Modifier::BOLD),
-                format!("{} {}", self.bix_data.design_capacity, power_unit.as_capacity_str()).into(),
+                format!(
+                    "{} {}",
+                    self.bix_data.design_capacity,
+                    power_unit_as_capacity_str(power_unit)
+                )
+                .into(),
             ]),
             Row::new(vec![
                 Text::raw("Last Full Capacity").add_modifier(Modifier::BOLD),
-                format!("{} {}", self.bix_data.last_full_capacity, power_unit.as_capacity_str()).into(),
+                format!(
+                    "{} {}",
+                    self.bix_data.last_full_charge_capacity,
+                    power_unit_as_capacity_str(power_unit)
+                )
+                .into(),
             ]),
             Row::new(vec![
                 Text::raw("Battery Technology").add_modifier(Modifier::BOLD),
-                format!("{}", self.bix_data.battery_technology.as_str()).into(),
+                bat_tech_as_str(self.bix_data.battery_technology).into(),
             ]),
             Row::new(vec![
                 Text::raw("Design Voltage").add_modifier(Modifier::BOLD),
@@ -346,11 +251,21 @@ impl<S: Source> Battery<S> {
             ]),
             Row::new(vec![
                 Text::raw("Warning Capacity").add_modifier(Modifier::BOLD),
-                format!("{} {}", self.bix_data.warning_capacity, power_unit.as_capacity_str()).into(),
+                format!(
+                    "{} {}",
+                    self.bix_data.design_cap_of_warning,
+                    power_unit_as_capacity_str(power_unit)
+                )
+                .into(),
             ]),
             Row::new(vec![
                 Text::raw("Low Capacity").add_modifier(Modifier::BOLD),
-                format!("{} {}", self.bix_data.low_capacity, power_unit.as_capacity_str()).into(),
+                format!(
+                    "{} {}",
+                    self.bix_data.design_cap_of_low,
+                    power_unit_as_capacity_str(power_unit)
+                )
+                .into(),
             ]),
             Row::new(vec![
                 Text::raw("Cycle Count").add_modifier(Modifier::BOLD),
@@ -358,59 +273,70 @@ impl<S: Source> Battery<S> {
             ]),
             Row::new(vec![
                 Text::raw("Accuracy").add_modifier(Modifier::BOLD),
-                format!("{}%", self.bix_data.accuracy as f64 / 1000.0).into(),
+                format!("{}%", self.bix_data.measurement_accuracy as f64 / 1000.0).into(),
             ]),
             Row::new(vec![
                 Text::raw("Max Sample Time").add_modifier(Modifier::BOLD),
-                format!("{} ms", self.bix_data.max_sample_time).into(),
+                format!("{} ms", self.bix_data.max_sampling_time).into(),
             ]),
             Row::new(vec![
                 Text::raw("Mix Sample Time").add_modifier(Modifier::BOLD),
-                format!("{} ms", self.bix_data.min_sample_time).into(),
+                format!("{} ms", self.bix_data.min_sampling_time).into(),
             ]),
             Row::new(vec![
                 Text::raw("Max Average Interval").add_modifier(Modifier::BOLD),
-                format!("{} ms", self.bix_data.max_average_interval).into(),
+                format!("{} ms", self.bix_data.max_averaging_interval).into(),
             ]),
             Row::new(vec![
                 Text::raw("Min Average Interval").add_modifier(Modifier::BOLD),
-                format!("{} ms", self.bix_data.min_average_interval).into(),
+                format!("{} ms", self.bix_data.min_averaging_interval).into(),
             ]),
             Row::new(vec![
                 Text::raw("Capacity Granularity 1").add_modifier(Modifier::BOLD),
-                format!("{} {}", self.bix_data.capacity_gran1, power_unit.as_capacity_str()).into(),
+                format!(
+                    "{} {}",
+                    self.bix_data.battery_capacity_granularity_1,
+                    power_unit_as_capacity_str(power_unit)
+                )
+                .into(),
             ]),
             Row::new(vec![
                 Text::raw("Capacity Granularity 2").add_modifier(Modifier::BOLD),
-                format!("{} {}", self.bix_data.capacity_gran2, power_unit.as_capacity_str()).into(),
+                format!(
+                    "{} {}",
+                    self.bix_data.battery_capacity_granularity_2,
+                    power_unit_as_capacity_str(power_unit)
+                )
+                .into(),
             ]),
             Row::new(vec![
                 Text::raw("Model Number").add_modifier(Modifier::BOLD),
-                format!("{}", self.bix_data.model_number).into(),
+                str_from_bytes(&self.bix_data.model_number).into(),
             ]),
             Row::new(vec![
                 Text::raw("Serial Number").add_modifier(Modifier::BOLD),
-                format!("{}", self.bix_data.serial_number).into(),
+                str_from_bytes(&self.bix_data.serial_number).into(),
             ]),
             Row::new(vec![
                 Text::raw("Battery Type").add_modifier(Modifier::BOLD),
-                format!("{}", self.bix_data.battery_type).into(),
+                str_from_bytes(&self.bix_data.battery_type).into(),
             ]),
             Row::new(vec![
                 Text::raw("OEM Info").add_modifier(Modifier::BOLD),
-                format!("{}", self.bix_data.oem_info).into(),
+                str_from_bytes(&self.bix_data.oem_info).into(),
             ]),
             Row::new(vec![
                 Text::raw("Swapping Capability").add_modifier(Modifier::BOLD),
-                format!("{}", self.bix_data.swap_cap.as_str()).into(),
+                swap_cap_as_str(self.bix_data.battery_swapping_capability).into(),
             ]),
         ]
     }
 
     fn render_bix(&self, area: Rect, buf: &mut Buffer) {
         let widths = [Constraint::Percentage(30), Constraint::Percentage(70)];
+        let title = common::title_str_with_status("Battery Info", self.state.bix_success);
         let table = Table::new(self.create_info(), widths)
-            .block(Block::bordered().title("Battery Info"))
+            .block(Block::bordered().title(title))
             .style(Style::new().white());
         Widget::render(table, area, buf);
     }
@@ -418,18 +344,24 @@ impl<S: Source> Battery<S> {
     fn create_status(&self) -> Vec<Line<'static>> {
         let power_unit = self.bix_data.power_unit;
         vec![
-            Line::raw(format!("State:               {}", self.bst_data.state.as_str())),
+            Line::raw(format!(
+                "State:               {}",
+                charge_state_as_str(self.bst_data.battery_state)
+            )),
             Line::raw(format!(
                 "Present Rate:        {} {}",
-                self.bst_data.rate,
-                power_unit.as_rate_str()
+                self.bst_data.battery_present_rate,
+                power_unit_as_rate_str(power_unit)
             )),
             Line::raw(format!(
                 "Remaining Capacity:  {} {}",
-                self.bst_data.capacity,
-                power_unit.as_capacity_str()
+                self.bst_data.battery_remaining_capacity,
+                power_unit_as_capacity_str(power_unit)
             )),
-            Line::raw(format!("Present Voltage:     {} mV", self.bst_data.voltage)),
+            Line::raw(format!(
+                "Present Voltage:     {} mV",
+                self.bst_data.battery_present_voltage
+            )),
         ]
     }
 
@@ -443,7 +375,7 @@ impl<S: Source> Battery<S> {
         vec![Line::raw(format!(
             "Current: {} {}",
             self.state.btp,
-            self.bix_data.power_unit.as_capacity_str()
+            power_unit_as_capacity_str(self.bix_data.power_unit)
         ))]
     }
 
@@ -471,16 +403,20 @@ impl<S: Source> Battery<S> {
     }
 
     fn render_battery(&self, area: Rect, buf: &mut Buffer) {
-        let mut state =
-            battery::BatteryState::new(self.bst_data.capacity, self.bst_data.state == ChargeState::Charging);
+        let mut state = battery::BatteryState::new(
+            self.bst_data.battery_remaining_capacity,
+            self.bst_data
+                .battery_state
+                .contains(battery_service_messages::BatteryState::CHARGING),
+        );
 
         battery::Battery::default()
             .color_high(BATGAUGE_COLOR_HIGH)
             .color_warning(BATGAUGE_COLOR_MEDIUM)
             .color_low(BATGAUGE_COLOR_LOW)
             .design_capacity(self.bix_data.design_capacity)
-            .warning_capacity(self.bix_data.warning_capacity)
-            .low_capacity(self.bix_data.low_capacity)
+            .warning_capacity(self.bix_data.design_cap_of_warning)
+            .low_capacity(self.bix_data.design_cap_of_low)
             .render(area, buf, &mut state)
     }
 }
